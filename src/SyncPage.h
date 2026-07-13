@@ -32,6 +32,8 @@ private slots:
     void onRevertClean();
     void onPull();
     void onSwitchBranch();
+    void onRevertCleanSubmodules();
+    void onSwitchSubmodulesBranch();
 
     void onScanFinished(QStringList repoPaths);
     void onProgress(int done, int total);
@@ -39,6 +41,8 @@ private slots:
     void onRevertCleanFinished();
     void onPullFinished();
     void onSwitchFinished();
+    void onRevertCleanSubmodulesFinished();
+    void onSwitchSubmodulesFinished();
     void onTableItemChanged(QTableWidgetItem *item);
 
 private:
@@ -63,6 +67,8 @@ private:
     QPushButton *m_pullBtn;
     QLineEdit *m_branchEdit;
     QPushButton *m_switchBtn;
+    QPushButton *m_revertCleanSubBtn;
+    QPushButton *m_switchSubBtn;
     QProgressBar *m_progressBar;
 
     QThread *m_thread;

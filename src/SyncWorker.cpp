@@ -26,6 +26,19 @@ bool looksLikeConflict(const QString &output)
 
 SyncWorker::SyncWorker(QObject *parent) : QObject(parent) {}
 
+GitCommandResult SyncWorker::forceUpdateSubmodules(const QString &path, const std::function<void(const QString &)> &onLine)
+{
+    // Discard local changes in any already-checked-out submodules first: "submodule update" checks
+    // out the pinned commit in each submodule and aborts if that would overwrite dirty/untracked files.
+    GitProcess::run(path,
+                     {QStringLiteral("submodule"), QStringLiteral("foreach"), QStringLiteral("--recursive"),
+                      QStringLiteral("git reset --hard HEAD 2>/dev/null || true; git clean -fd 2>/dev/null || true")},
+                     onLine);
+
+    return GitProcess::run(
+        path, {QStringLiteral("submodule"), QStringLiteral("update"), QStringLiteral("--init"), QStringLiteral("--recursive")}, onLine);
+}
+
 void SyncWorker::scanRecursive(const QString &path, QStringList &out)
 {
     QDir dir(path);
@@ -110,8 +123,26 @@ void SyncWorker::pullAll(QStringList repoPaths)
             continue;
         }
 
+        QString message = lastMeaningfulLine(pullResult.output);
+
+        if (QFileInfo::exists(QDir(path).filePath(QStringLiteral(".gitmodules")))) {
+            emit logInfo(QStringLiteral("Updating submodules for ") + path + QStringLiteral("..."));
+            const auto subResult = forceUpdateSubmodules(path, onLine);
+            if (!subResult.success) {
+                const QString reason = lastMeaningfulLine(subResult.output);
+                emit logWarning(QStringLiteral("Submodule update failed for ") + path + QStringLiteral(": ") + reason);
+                message += QStringLiteral("; submodule update failed: ") + reason;
+            } else {
+                GitProcess::run(path,
+                                 {QStringLiteral("submodule"), QStringLiteral("foreach"), QStringLiteral("--recursive"),
+                                  QStringLiteral("git checkout main 2>/dev/null || git checkout master 2>/dev/null || true; git pull 2>/dev/null || true")},
+                                 onLine);
+                message += QStringLiteral("; submodules switched to main/master and pulled");
+            }
+        }
+
         emit logInfo(QStringLiteral("Up to date: ") + path);
-        emit repoResult(path, QStringLiteral("OK"), lastMeaningfulLine(pullResult.output));
+        emit repoResult(path, QStringLiteral("OK"), message);
         ++done;
         emit progress(done, total);
     }
@@ -165,4 +196,95 @@ void SyncWorker::switchBranch(QStringList repoPaths, QString branchName)
 
     emit logInfo(QStringLiteral("Batch branch switch finished."));
     emit switchFinished();
+}
+
+void SyncWorker::revertCleanSubmodules(QStringList repoPaths)
+{
+    const int total = repoPaths.size();
+    int done = 0;
+
+    for (const QString &path : repoPaths) {
+        emit logInfo(QStringLiteral("==== Revert & Clean Submodules %1 ====").arg(path));
+        auto onLine = [this](const QString &line) { emit logLine(line); };
+
+        if (!QFileInfo::exists(QDir(path).filePath(QStringLiteral(".gitmodules")))) {
+            emit repoResult(path, QStringLiteral("OK"), QStringLiteral("No submodules"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
+
+        const auto initResult = forceUpdateSubmodules(path, onLine);
+        if (!initResult.success) {
+            const QString reason = lastMeaningfulLine(initResult.output);
+            emit logError(QStringLiteral("Submodule init failed for ") + path + QStringLiteral(": ") + reason);
+            emit repoResult(path, QStringLiteral("Failed"), QStringLiteral("git submodule update --init --recursive failed: ") + reason);
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
+
+        // Reset again after update so any changes re-introduced by the checkout above (e.g. an
+        // inner submodule left dirty by its own pin) are also cleared.
+        GitProcess::run(path,
+                         {QStringLiteral("submodule"), QStringLiteral("foreach"), QStringLiteral("--recursive"),
+                          QStringLiteral("git reset --hard HEAD 2>/dev/null || true; git clean -fd 2>/dev/null || true")},
+                         onLine);
+
+        emit logInfo(QStringLiteral("Reverted and cleaned submodules: ") + path);
+        emit repoResult(path, QStringLiteral("OK"), QStringLiteral("Submodules reverted and cleaned"));
+        ++done;
+        emit progress(done, total);
+    }
+
+    emit logInfo(QStringLiteral("Batch submodule revert & clean finished."));
+    emit revertCleanSubmodulesFinished();
+}
+
+void SyncWorker::switchSubmodulesAndPull(QStringList repoPaths, QString branchName)
+{
+    const int total = repoPaths.size();
+    int done = 0;
+
+    QString escapedBranch = branchName;
+    escapedBranch.replace(QStringLiteral("\\"), QStringLiteral("\\\\"));
+    escapedBranch.replace(QStringLiteral("\""), QStringLiteral("\\\""));
+
+    const QString foreachCmd = QStringLiteral(
+        "git checkout \"%1\" 2>/dev/null || git checkout -b \"%1\" --track \"origin/%1\" 2>/dev/null || git checkout -b \"%1\" 2>/dev/null || true; "
+        "git pull 2>/dev/null || true").arg(escapedBranch);
+
+    for (const QString &path : repoPaths) {
+        emit logInfo(QStringLiteral("==== Switching Submodules %1 to '%2' and Pulling ====").arg(path, branchName));
+        auto onLine = [this](const QString &line) { emit logLine(line); };
+
+        if (!QFileInfo::exists(QDir(path).filePath(QStringLiteral(".gitmodules")))) {
+            emit repoResult(path, QStringLiteral("OK"), QStringLiteral("No submodules"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
+
+        const auto initResult = forceUpdateSubmodules(path, onLine);
+        if (!initResult.success) {
+            const QString reason = lastMeaningfulLine(initResult.output);
+            emit logError(QStringLiteral("Submodule init failed for ") + path + QStringLiteral(": ") + reason);
+            emit repoResult(path, QStringLiteral("Failed"), QStringLiteral("git submodule update --init --recursive failed: ") + reason);
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
+
+        GitProcess::run(path,
+                         {QStringLiteral("submodule"), QStringLiteral("foreach"), QStringLiteral("--recursive"), foreachCmd},
+                         onLine);
+
+        emit logInfo(QStringLiteral("Switched submodules: ") + path);
+        emit repoResult(path, QStringLiteral("OK"), QStringLiteral("Submodules switched to '%1' and pulled").arg(branchName));
+        ++done;
+        emit progress(done, total);
+    }
+
+    emit logInfo(QStringLiteral("Batch submodule branch switch finished."));
+    emit switchSubmodulesFinished();
 }

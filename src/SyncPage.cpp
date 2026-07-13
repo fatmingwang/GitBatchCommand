@@ -47,6 +47,12 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     m_branchEdit->setPlaceholderText(QStringLiteral("target branch name, e.g. develop"));
     m_switchBtn = new QPushButton(QStringLiteral("Switch Selected To Branch"), this);
 
+    m_revertCleanSubBtn = new QPushButton(QStringLiteral("Revert && Clean Submodules"), this);
+    m_revertCleanSubBtn->setMinimumHeight(32);
+
+    m_switchSubBtn = new QPushButton(QStringLiteral("Switch Submodules To Branch && Pull"), this);
+    m_switchSubBtn->setMinimumHeight(32);
+
     m_progressBar = new QProgressBar(this);
     m_progressBar->setRange(0, 1);
     m_progressBar->setValue(0);
@@ -73,6 +79,14 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     branchRow->addWidget(m_branchEdit);
     branchRow->addWidget(m_switchBtn);
 
+    auto *submoduleRow = new QHBoxLayout;
+    submoduleRow->addWidget(m_revertCleanSubBtn);
+    submoduleRow->addWidget(m_switchSubBtn);
+
+    auto *submoduleGroup = new QGroupBox(QStringLiteral("Submodules"), this);
+    auto *submoduleLayout = new QVBoxLayout(submoduleGroup);
+    submoduleLayout->addLayout(submoduleRow);
+
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(rootGroup);
     mainLayout->addLayout(selectionRow);
@@ -80,6 +94,7 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     mainLayout->addWidget(m_progressBar);
     mainLayout->addLayout(actionRow);
     mainLayout->addLayout(branchRow);
+    mainLayout->addWidget(submoduleGroup);
 
     connect(m_browseBtn, &QPushButton::clicked, this, &SyncPage::onBrowseRoot);
     connect(m_scanBtn, &QPushButton::clicked, this, &SyncPage::onScan);
@@ -89,6 +104,8 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     connect(m_revertCleanBtn, &QPushButton::clicked, this, &SyncPage::onRevertClean);
     connect(m_pullBtn, &QPushButton::clicked, this, &SyncPage::onPull);
     connect(m_switchBtn, &QPushButton::clicked, this, &SyncPage::onSwitchBranch);
+    connect(m_revertCleanSubBtn, &QPushButton::clicked, this, &SyncPage::onRevertCleanSubmodules);
+    connect(m_switchSubBtn, &QPushButton::clicked, this, &SyncPage::onSwitchSubmodulesBranch);
 
     m_thread = new QThread(this);
     m_worker = new SyncWorker();
@@ -105,6 +122,8 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     connect(m_worker, &SyncWorker::revertCleanFinished, this, &SyncPage::onRevertCleanFinished);
     connect(m_worker, &SyncWorker::pullFinished, this, &SyncPage::onPullFinished);
     connect(m_worker, &SyncWorker::switchFinished, this, &SyncPage::onSwitchFinished);
+    connect(m_worker, &SyncWorker::revertCleanSubmodulesFinished, this, &SyncPage::onRevertCleanSubmodulesFinished);
+    connect(m_worker, &SyncWorker::switchSubmodulesFinished, this, &SyncPage::onSwitchSubmodulesFinished);
 
     m_thread->start();
 
@@ -113,6 +132,8 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     m_revertCleanBtn->setEnabled(false);
     m_pullBtn->setEnabled(false);
     m_switchBtn->setEnabled(false);
+    m_revertCleanSubBtn->setEnabled(false);
+    m_switchSubBtn->setEnabled(false);
 }
 
 SyncPage::~SyncPage()
@@ -146,6 +167,8 @@ void SyncPage::updateActionButtons()
     m_revertCleanBtn->setEnabled(hasSelection);
     m_pullBtn->setEnabled(hasSelection);
     m_switchBtn->setEnabled(hasSelection);
+    m_revertCleanSubBtn->setEnabled(hasSelection);
+    m_switchSubBtn->setEnabled(hasSelection);
 }
 
 void SyncPage::onScan()
@@ -383,4 +406,68 @@ void SyncPage::onSwitchFinished()
 {
     showProblemsSummary(QStringLiteral("Branch Switch Finished"),
                          QStringLiteral("All repositories were switched successfully."));
+}
+
+void SyncPage::onRevertCleanSubmodules()
+{
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Revert && Clean Submodules"), QStringLiteral("Please select at least one repository first."));
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Confirm Submodule Revert && Clean"));
+    box.setText(QStringLiteral("This will discard ALL local changes (git reset --hard + git clean -fd) "
+                               "in every submodule of %1 selected repositories.\n\n"
+                               "Uncommitted work in those submodules will be LOST. Continue?").arg(selected.size()));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Starting submodule revert & clean for %1 selected repositories...").arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "revertCleanSubmodules", Qt::QueuedConnection, Q_ARG(QStringList, selected));
+}
+
+void SyncPage::onRevertCleanSubmodulesFinished()
+{
+    showProblemsSummary(QStringLiteral("Submodule Revert && Clean Finished"),
+                         QStringLiteral("All submodules were reverted and cleaned successfully."));
+}
+
+void SyncPage::onSwitchSubmodulesBranch()
+{
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Switch Submodules Branch"), QStringLiteral("Please select at least one repository first."));
+        return;
+    }
+    const QString branch = m_branchEdit->text().trimmed();
+    if (branch.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Switch Submodules Branch"), QStringLiteral("Please enter a target branch name."));
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Confirm Submodule Branch Switch"));
+    box.setText(QStringLiteral("Switch every submodule of %1 selected repositories to branch '%2' and pull latest?").arg(selected.size()).arg(branch));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Switching submodules of %1 selected repositories to branch '%2' and pulling...").arg(selected.size()).arg(branch));
+    QMetaObject::invokeMethod(m_worker, "switchSubmodulesAndPull", Qt::QueuedConnection,
+                               Q_ARG(QStringList, selected), Q_ARG(QString, branch));
+}
+
+void SyncPage::onSwitchSubmodulesFinished()
+{
+    showProblemsSummary(QStringLiteral("Submodule Branch Switch Finished"),
+                         QStringLiteral("All submodules were switched and pulled successfully."));
 }
