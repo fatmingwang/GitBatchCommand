@@ -25,23 +25,27 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     m_browseBtn = new QPushButton(QStringLiteral("Browse..."), this);
     m_scanBtn = new QPushButton(QStringLiteral("Scan"), this);
 
-    m_table = new QTableWidget(0, 3, this);
-    m_table->setHorizontalHeaderLabels({QStringLiteral("Repository"), QStringLiteral("Path"), QStringLiteral("Status")});
+    m_table = new QTableWidget(0, 4, this);
+    m_table->setHorizontalHeaderLabels({QString(), QStringLiteral("Repository"), QStringLiteral("Path"), QStringLiteral("Status")});
     m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
+    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionMode(QAbstractItemView::NoSelection);
 
-    m_revertCleanBtn = new QPushButton(QStringLiteral("Revert && Clean All"), this);
+    m_selectAllBtn = new QPushButton(QStringLiteral("Select All"), this);
+    m_selectNoneBtn = new QPushButton(QStringLiteral("Select None"), this);
+
+    m_revertCleanBtn = new QPushButton(QStringLiteral("Revert && Clean Selected"), this);
     m_revertCleanBtn->setMinimumHeight(32);
 
-    m_pullBtn = new QPushButton(QStringLiteral("Pull All"), this);
+    m_pullBtn = new QPushButton(QStringLiteral("Pull Selected"), this);
     m_pullBtn->setMinimumHeight(32);
 
     m_branchEdit = new QLineEdit(this);
     m_branchEdit->setPlaceholderText(QStringLiteral("target branch name, e.g. develop"));
-    m_switchBtn = new QPushButton(QStringLiteral("Switch All To Branch"), this);
+    m_switchBtn = new QPushButton(QStringLiteral("Switch Selected To Branch"), this);
 
     m_progressBar = new QProgressBar(this);
     m_progressBar->setRange(0, 1);
@@ -56,6 +60,11 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     auto *rootLayout = new QVBoxLayout(rootGroup);
     rootLayout->addLayout(rootRow);
 
+    auto *selectionRow = new QHBoxLayout;
+    selectionRow->addWidget(m_selectAllBtn);
+    selectionRow->addWidget(m_selectNoneBtn);
+    selectionRow->addStretch();
+
     auto *actionRow = new QHBoxLayout;
     actionRow->addWidget(m_revertCleanBtn);
     actionRow->addWidget(m_pullBtn);
@@ -66,6 +75,7 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
 
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(rootGroup);
+    mainLayout->addLayout(selectionRow);
     mainLayout->addWidget(m_table);
     mainLayout->addWidget(m_progressBar);
     mainLayout->addLayout(actionRow);
@@ -73,6 +83,9 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
 
     connect(m_browseBtn, &QPushButton::clicked, this, &SyncPage::onBrowseRoot);
     connect(m_scanBtn, &QPushButton::clicked, this, &SyncPage::onScan);
+    connect(m_selectAllBtn, &QPushButton::clicked, this, &SyncPage::onSelectAll);
+    connect(m_selectNoneBtn, &QPushButton::clicked, this, &SyncPage::onSelectNone);
+    connect(m_table, &QTableWidget::itemChanged, this, &SyncPage::onTableItemChanged);
     connect(m_revertCleanBtn, &QPushButton::clicked, this, &SyncPage::onRevertClean);
     connect(m_pullBtn, &QPushButton::clicked, this, &SyncPage::onPull);
     connect(m_switchBtn, &QPushButton::clicked, this, &SyncPage::onSwitchBranch);
@@ -95,6 +108,8 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
 
     m_thread->start();
 
+    m_selectAllBtn->setEnabled(false);
+    m_selectNoneBtn->setEnabled(false);
     m_revertCleanBtn->setEnabled(false);
     m_pullBtn->setEnabled(false);
     m_switchBtn->setEnabled(false);
@@ -115,14 +130,22 @@ void SyncPage::onBrowseRoot()
 
 void SyncPage::setBusy(bool busy)
 {
+    m_busy = busy;
     m_browseBtn->setEnabled(!busy);
     m_scanBtn->setEnabled(!busy);
     m_rootEdit->setEnabled(!busy);
     m_branchEdit->setEnabled(!busy);
-    const bool hasRepos = !m_repoPaths.isEmpty();
-    m_revertCleanBtn->setEnabled(!busy && hasRepos);
-    m_pullBtn->setEnabled(!busy && hasRepos);
-    m_switchBtn->setEnabled(!busy && hasRepos);
+    m_selectAllBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
+    m_selectNoneBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
+    updateActionButtons();
+}
+
+void SyncPage::updateActionButtons()
+{
+    const bool hasSelection = !m_busy && !selectedPaths().isEmpty();
+    m_revertCleanBtn->setEnabled(hasSelection);
+    m_pullBtn->setEnabled(hasSelection);
+    m_switchBtn->setEnabled(hasSelection);
 }
 
 void SyncPage::onScan()
@@ -133,18 +156,49 @@ void SyncPage::onScan()
         return;
     }
     setBusy(true);
-    m_revertCleanBtn->setEnabled(false);
-    m_pullBtn->setEnabled(false);
-    m_switchBtn->setEnabled(false);
     m_table->setRowCount(0);
     m_repoPaths.clear();
     QMetaObject::invokeMethod(m_worker, "scan", Qt::QueuedConnection, Q_ARG(QString, root));
 }
 
+void SyncPage::onSelectAll()
+{
+    for (int r = 0; r < m_table->rowCount(); ++r)
+        setRowChecked(r, true);
+}
+
+void SyncPage::onSelectNone()
+{
+    for (int r = 0; r < m_table->rowCount(); ++r)
+        setRowChecked(r, false);
+}
+
+void SyncPage::setRowChecked(int row, bool checked)
+{
+    if (auto *item = m_table->item(row, 0))
+        item->setCheckState(checked ? Qt::Checked : Qt::Unchecked);
+}
+
+QStringList SyncPage::selectedPaths() const
+{
+    QStringList paths;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        if (m_table->item(r, 0)->checkState() == Qt::Checked)
+            paths << m_table->item(r, 2)->text();
+    }
+    return paths;
+}
+
+void SyncPage::onTableItemChanged(QTableWidgetItem *item)
+{
+    if (item && item->column() == 0)
+        updateActionButtons();
+}
+
 int SyncPage::rowForPath(const QString &path) const
 {
     for (int r = 0; r < m_table->rowCount(); ++r) {
-        if (m_table->item(r, 1)->text() == path)
+        if (m_table->item(r, 2)->text() == path)
             return r;
     }
     return -1;
@@ -156,9 +210,15 @@ void SyncPage::populateTable(const QStringList &paths)
     for (int r = 0; r < paths.size(); ++r) {
         const QString &path = paths[r];
         const QString name = QDir(path).dirName();
-        m_table->setItem(r, 0, new QTableWidgetItem(name));
-        m_table->setItem(r, 1, new QTableWidgetItem(path));
-        m_table->setItem(r, 2, new QTableWidgetItem(QStringLiteral("Pending")));
+
+        auto *checkItem = new QTableWidgetItem;
+        checkItem->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled);
+        checkItem->setCheckState(Qt::Checked);
+        m_table->setItem(r, 0, checkItem);
+
+        m_table->setItem(r, 1, new QTableWidgetItem(name));
+        m_table->setItem(r, 2, new QTableWidgetItem(path));
+        m_table->setItem(r, 3, new QTableWidgetItem(QStringLiteral("Pending")));
     }
 }
 
@@ -191,18 +251,20 @@ void SyncPage::onRepoResult(QString path, QString status, QString message)
         else
             item->setForeground(QColor(QStringLiteral("#d32f2f")));
         item->setToolTip(message);
-        m_table->setItem(row, 2, item);
+        m_table->setItem(row, 3, item);
     }
 }
 
-void SyncPage::beginOperation(int repoCount)
+void SyncPage::beginOperation(const QStringList &selected)
 {
     m_results.clear();
     setBusy(true);
-    m_progressBar->setRange(0, repoCount);
+    m_progressBar->setRange(0, selected.size());
     m_progressBar->setValue(0);
-    for (int r = 0; r < m_table->rowCount(); ++r)
-        m_table->item(r, 2)->setText(QStringLiteral("Working..."));
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        const bool isSelected = m_table->item(r, 0)->checkState() == Qt::Checked;
+        m_table->item(r, 3)->setText(isSelected ? QStringLiteral("Working...") : QStringLiteral("Skipped"));
+    }
 }
 
 void SyncPage::showProblemsSummary(const QString &title, const QString &okMessage)
@@ -233,23 +295,26 @@ void SyncPage::showProblemsSummary(const QString &title, const QString &okMessag
 
 void SyncPage::onRevertClean()
 {
-    if (m_repoPaths.isEmpty())
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Revert && Clean"), QStringLiteral("Please select at least one repository first."));
         return;
+    }
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle(QStringLiteral("Confirm Revert && Clean"));
     box.setText(QStringLiteral("This will discard ALL local changes (git reset --hard + git clean -fd) "
-                               "in %1 repositories.\n\n"
-                               "Uncommitted work will be LOST. Continue?").arg(m_repoPaths.size()));
+                               "in %1 selected repositories.\n\n"
+                               "Uncommitted work will be LOST. Continue?").arg(selected.size()));
     box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
     box.setDefaultButton(QMessageBox::No);
     if (box.exec() != QMessageBox::Yes)
         return;
 
-    beginOperation(m_repoPaths.size());
-    m_logPanel->appendInfo(QStringLiteral("Starting revert & clean for %1 repositories...").arg(m_repoPaths.size()));
-    QMetaObject::invokeMethod(m_worker, "revertClean", Qt::QueuedConnection, Q_ARG(QStringList, m_repoPaths));
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Starting revert & clean for %1 selected repositories...").arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "revertClean", Qt::QueuedConnection, Q_ARG(QStringList, selected));
 }
 
 void SyncPage::onRevertCleanFinished()
@@ -260,21 +325,24 @@ void SyncPage::onRevertCleanFinished()
 
 void SyncPage::onPull()
 {
-    if (m_repoPaths.isEmpty())
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Pull"), QStringLiteral("Please select at least one repository first."));
         return;
+    }
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(QStringLiteral("Confirm Pull"));
-    box.setText(QStringLiteral("Pull the latest changes in %1 repositories?").arg(m_repoPaths.size()));
+    box.setText(QStringLiteral("Pull the latest changes in %1 selected repositories?").arg(selected.size()));
     box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
     box.setDefaultButton(QMessageBox::No);
     if (box.exec() != QMessageBox::Yes)
         return;
 
-    beginOperation(m_repoPaths.size());
-    m_logPanel->appendInfo(QStringLiteral("Starting pull for %1 repositories...").arg(m_repoPaths.size()));
-    QMetaObject::invokeMethod(m_worker, "pullAll", Qt::QueuedConnection, Q_ARG(QStringList, m_repoPaths));
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Starting pull for %1 selected repositories...").arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "pullAll", Qt::QueuedConnection, Q_ARG(QStringList, selected));
 }
 
 void SyncPage::onPullFinished()
@@ -285,8 +353,11 @@ void SyncPage::onPullFinished()
 
 void SyncPage::onSwitchBranch()
 {
-    if (m_repoPaths.isEmpty())
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Switch Branch"), QStringLiteral("Please select at least one repository first."));
         return;
+    }
     const QString branch = m_branchEdit->text().trimmed();
     if (branch.isEmpty()) {
         QMessageBox::information(this, QStringLiteral("Switch Branch"), QStringLiteral("Please enter a target branch name."));
@@ -296,16 +367,16 @@ void SyncPage::onSwitchBranch()
     QMessageBox box(this);
     box.setIcon(QMessageBox::Question);
     box.setWindowTitle(QStringLiteral("Confirm Branch Switch"));
-    box.setText(QStringLiteral("Switch %1 repositories to branch '%2'?").arg(m_repoPaths.size()).arg(branch));
+    box.setText(QStringLiteral("Switch %1 selected repositories to branch '%2'?").arg(selected.size()).arg(branch));
     box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
     box.setDefaultButton(QMessageBox::No);
     if (box.exec() != QMessageBox::Yes)
         return;
 
-    beginOperation(m_repoPaths.size());
-    m_logPanel->appendInfo(QStringLiteral("Switching %1 repositories to branch '%2'...").arg(m_repoPaths.size()).arg(branch));
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Switching %1 selected repositories to branch '%2'...").arg(selected.size()).arg(branch));
     QMetaObject::invokeMethod(m_worker, "switchBranch", Qt::QueuedConnection,
-                               Q_ARG(QStringList, m_repoPaths), Q_ARG(QString, branch));
+                               Q_ARG(QStringList, selected), Q_ARG(QString, branch));
 }
 
 void SyncPage::onSwitchFinished()

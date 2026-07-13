@@ -4,6 +4,7 @@
 #include <QStringList>
 
 class QTableWidget;
+class QTableWidgetItem;
 class QLineEdit;
 class QPushButton;
 class QProgressBar;
@@ -26,6 +27,8 @@ public:
 private slots:
     void onBrowseRoot();
     void onScan();
+    void onSelectAll();
+    void onSelectNone();
     void onRevertClean();
     void onPull();
     void onSwitchBranch();
@@ -36,13 +39,17 @@ private slots:
     void onRevertCleanFinished();
     void onPullFinished();
     void onSwitchFinished();
+    void onTableItemChanged(QTableWidgetItem *item);
 
 private:
     void setBusy(bool busy);
     void populateTable(const QStringList &paths);
     int rowForPath(const QString &path) const;
-    void beginOperation(int repoCount);
+    void beginOperation(const QStringList &selectedPaths);
     void showProblemsSummary(const QString &title, const QString &okMessage);
+    void updateActionButtons();
+    QStringList selectedPaths() const;
+    void setRowChecked(int row, bool checked);
 
     LogPanel *m_logPanel;
 
@@ -50,6 +57,8 @@ private:
     QPushButton *m_browseBtn;
     QPushButton *m_scanBtn;
     QTableWidget *m_table;
+    QPushButton *m_selectAllBtn;
+    QPushButton *m_selectNoneBtn;
     QPushButton *m_revertCleanBtn;
     QPushButton *m_pullBtn;
     QLineEdit *m_branchEdit;
@@ -59,6 +68,7 @@ private:
     QThread *m_thread;
     SyncWorker *m_worker;
 
+    bool m_busy = false;
     QStringList m_repoPaths;
     QVector<SyncRepoRow> m_results;
 };
