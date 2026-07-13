@@ -32,10 +32,14 @@ add_executable(BatchGitCommand WIN32
     src/ClonePage.cpp
     src/SyncPage.h
     src/SyncPage.cpp
+    src/CommitPage.h
+    src/CommitPage.cpp
     src/CloneWorker.h
     src/CloneWorker.cpp
     src/SyncWorker.h
     src/SyncWorker.cpp
+    src/CommitWorker.h
+    src/CommitWorker.cpp
     src/GitProcess.h
     src/GitProcess.cpp
 )
