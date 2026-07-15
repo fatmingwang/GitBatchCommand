@@ -11,11 +11,15 @@ set(CMAKE_AUTOUIC ON)
 # ──────────────────────────────────────────────
 # Qt install prefix – set CMAKE_PREFIX_PATH env var or override here.
 # Visual Studio's "Open Folder" CMake integration configures with no
-# extra arguments, so without this default it cannot find Qt.
+# extra arguments, so without this default it cannot find Qt. Appending
+# (rather than only setting when undefined) also survives VS auto-injecting
+# a vcpkg toolchain file, which populates CMAKE_PREFIX_PATH on its own and
+# would otherwise cause this default to be skipped.
 # ──────────────────────────────────────────────
-if(NOT DEFINED CMAKE_PREFIX_PATH)
-    set(CMAKE_PREFIX_PATH "C:/Users/leeyo/Qt/6.9.0/msvc2022_64" CACHE PATH "Qt install prefix")
-    message(STATUS "CMAKE_PREFIX_PATH not set, defaulting to: ${CMAKE_PREFIX_PATH}")
+set(BATCHGITCOMMAND_DEFAULT_QT_PREFIX "C:/Users/leeyo/Qt/6.9.0/msvc2022_64")
+if(NOT BATCHGITCOMMAND_DEFAULT_QT_PREFIX IN_LIST CMAKE_PREFIX_PATH)
+    list(APPEND CMAKE_PREFIX_PATH "${BATCHGITCOMMAND_DEFAULT_QT_PREFIX}")
+    message(STATUS "Adding default Qt prefix to CMAKE_PREFIX_PATH: ${BATCHGITCOMMAND_DEFAULT_QT_PREFIX}")
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
