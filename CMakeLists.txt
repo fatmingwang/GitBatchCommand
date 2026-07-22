@@ -44,6 +44,8 @@ add_executable(BatchGitCommand WIN32
     src/SyncWorker.cpp
     src/CommitWorker.h
     src/CommitWorker.cpp
+    src/RepoScanner.h
+    src/RepoScanner.cpp
     src/GitProcess.h
     src/GitProcess.cpp
 )

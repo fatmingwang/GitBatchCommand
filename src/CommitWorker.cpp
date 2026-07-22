@@ -1,8 +1,6 @@
 #include "CommitWorker.h"
 #include "GitProcess.h"
-
-#include <QDir>
-#include <QFileInfo>
+#include "RepoScanner.h"
 
 namespace {
 
@@ -26,29 +24,16 @@ bool looksLikeConflict(const QString &output)
 
 CommitWorker::CommitWorker(QObject *parent) : QObject(parent) {}
 
-void CommitWorker::scanRecursive(const QString &path, QStringList &out)
-{
-    QDir dir(path);
-    if (!dir.exists())
-        return;
-    if (dir.exists(QStringLiteral(".git"))) {
-        out << QDir::toNativeSeparators(dir.absolutePath());
-        return;
-    }
-    const auto entries = dir.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::NoSymLinks);
-    for (const QFileInfo &fi : entries) {
-        scanRecursive(fi.absoluteFilePath(), out);
-    }
-}
-
 void CommitWorker::scan(QString rootDir)
 {
     emit logInfo(QStringLiteral("Scanning ") + rootDir + QStringLiteral(" for git repositories..."));
-    QStringList found;
-    scanRecursive(rootDir, found);
-    found.sort(Qt::CaseInsensitive);
-    emit logInfo(QStringLiteral("Found %1 repositories.").arg(found.size()));
-    emit scanFinished(found);
+    const QStringList allPaths = RepoScanner::findRepositories(rootDir);
+
+    emit logInfo(QStringLiteral("Found %1 repositories (including submodules).").arg(allPaths.size()));
+    emit scanFinished(allPaths);
+
+    for (const QString &path : allPaths)
+        emit repoBranchInfo(path, RepoScanner::currentBranch(path));
 }
 
 void CommitWorker::commitAll(QStringList repoPaths, QString message, bool stageAll)
@@ -59,6 +44,13 @@ void CommitWorker::commitAll(QStringList repoPaths, QString message, bool stageA
     for (const QString &path : repoPaths) {
         emit logInfo(QStringLiteral("==== Committing %1 ====").arg(path));
         auto onLine = [this](const QString &line) { emit logLine(line); };
+
+        if (!RepoScanner::ensureRepoReady(path, onLine)) {
+            emit repoResult(path, QStringLiteral("OK"), QStringLiteral("Not initialized; nothing to commit"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
 
         if (stageAll) {
             const auto addResult = GitProcess::run(path, {QStringLiteral("add"), QStringLiteral("-A")}, onLine);
@@ -108,6 +100,13 @@ void CommitWorker::pushAll(QStringList repoPaths)
         emit logInfo(QStringLiteral("==== Pushing %1 ====").arg(path));
         auto onLine = [this](const QString &line) { emit logLine(line); };
 
+        if (!RepoScanner::ensureRepoReady(path, onLine)) {
+            emit repoResult(path, QStringLiteral("Failed"), QStringLiteral("Not a git repository and could not be initialized as a submodule"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
+
         auto pushResult = GitProcess::run(path, {QStringLiteral("push")}, onLine);
         if (!pushResult.success && pushResult.output.contains(QStringLiteral("has no upstream branch"), Qt::CaseInsensitive)) {
             const auto branchResult = GitProcess::run(path, {QStringLiteral("rev-parse"), QStringLiteral("--abbrev-ref"), QStringLiteral("HEAD")}, nullptr);
@@ -145,6 +144,13 @@ void CommitWorker::switchBranch(QStringList repoPaths, QString branchName)
     for (const QString &path : repoPaths) {
         emit logInfo(QStringLiteral("==== Switching %1 to '%2' ====").arg(path, branchName));
         auto onLine = [this](const QString &line) { emit logLine(line); };
+
+        if (!RepoScanner::ensureRepoReady(path, onLine)) {
+            emit repoResult(path, QStringLiteral("Failed"), QStringLiteral("Not a git repository and could not be initialized as a submodule"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
 
         GitProcess::run(path, {QStringLiteral("fetch"), QStringLiteral("--all"), QStringLiteral("--prune")}, onLine);
 
@@ -192,6 +198,13 @@ void CommitWorker::mergeFromBranch(QStringList repoPaths, QString branchName)
     for (const QString &path : repoPaths) {
         emit logInfo(QStringLiteral("==== Merging '%1' into %2 ====").arg(branchName, path));
         auto onLine = [this](const QString &line) { emit logLine(line); };
+
+        if (!RepoScanner::ensureRepoReady(path, onLine)) {
+            emit repoResult(path, QStringLiteral("Failed"), QStringLiteral("Not a git repository and could not be initialized as a submodule"));
+            ++done;
+            emit progress(done, total);
+            continue;
+        }
 
         GitProcess::run(path, {QStringLiteral("fetch"), QStringLiteral("--all"), QStringLiteral("--prune")}, onLine);
 

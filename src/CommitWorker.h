@@ -2,16 +2,17 @@
 #include <QObject>
 #include <QStringList>
 
-class SyncWorker : public QObject {
+class CommitWorker : public QObject {
     Q_OBJECT
 public:
-    explicit SyncWorker(QObject *parent = nullptr);
+    explicit CommitWorker(QObject *parent = nullptr);
 
 public slots:
     void scan(QString rootDir);
-    void revertClean(QStringList repoPaths);
-    void pullAll(QStringList repoPaths);
+    void commitAll(QStringList repoPaths, QString message, bool stageAll);
+    void pushAll(QStringList repoPaths);
     void switchBranch(QStringList repoPaths, QString branchName);
+    void mergeFromBranch(QStringList repoPaths, QString branchName);
 
 signals:
     void logLine(QString line);
@@ -22,7 +23,8 @@ signals:
     void repoBranchInfo(QString path, QString branchInfo);
     void progress(int done, int total);
     void repoResult(QString path, QString status, QString message);
-    void revertCleanFinished();
-    void pullFinished();
+    void commitFinished();
+    void pushFinished();
     void switchFinished();
+    void mergeFinished();
 };

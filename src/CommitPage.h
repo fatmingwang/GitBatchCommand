@@ -6,40 +6,43 @@
 class QTableWidget;
 class QTableWidgetItem;
 class QLineEdit;
+class QCheckBox;
 class QPushButton;
 class QProgressBar;
 class QThread;
-class SyncWorker;
+class CommitWorker;
 class LogPanel;
 
-struct SyncRepoRow {
+struct CommitRepoRow {
     QString path;
     QString status;
     QString message;
 };
 
-class SyncPage : public QWidget {
+class CommitPage : public QWidget {
     Q_OBJECT
 public:
-    explicit SyncPage(LogPanel *logPanel, QWidget *parent = nullptr);
-    ~SyncPage() override;
+    explicit CommitPage(LogPanel *logPanel, QWidget *parent = nullptr);
+    ~CommitPage() override;
 
 private slots:
     void onBrowseRoot();
     void onScan();
     void onSelectAll();
     void onSelectNone();
-    void onRevertClean();
-    void onPull();
+    void onCommit();
+    void onPush();
     void onSwitchBranch();
+    void onMergeBranch();
 
     void onScanFinished(QStringList repoPaths);
     void onRepoBranchInfo(QString path, QString branchInfo);
     void onProgress(int done, int total);
     void onRepoResult(QString path, QString status, QString message);
-    void onRevertCleanFinished();
-    void onPullFinished();
+    void onCommitFinished();
+    void onPushFinished();
     void onSwitchFinished();
+    void onMergeFinished();
     void onTableItemChanged(QTableWidgetItem *item);
 
 private:
@@ -60,16 +63,24 @@ private:
     QTableWidget *m_table;
     QPushButton *m_selectAllBtn;
     QPushButton *m_selectNoneBtn;
-    QPushButton *m_revertCleanBtn;
-    QPushButton *m_pullBtn;
-    QLineEdit *m_branchEdit;
+
+    QLineEdit *m_commitMessageEdit;
+    QCheckBox *m_stageAllCheck;
+    QPushButton *m_commitBtn;
+    QPushButton *m_pushBtn;
+
+    QLineEdit *m_switchBranchEdit;
     QPushButton *m_switchBtn;
+
+    QLineEdit *m_mergeBranchEdit;
+    QPushButton *m_mergeBtn;
+
     QProgressBar *m_progressBar;
 
     QThread *m_thread;
-    SyncWorker *m_worker;
+    CommitWorker *m_worker;
 
     bool m_busy = false;
     QStringList m_repoPaths;
-    QVector<SyncRepoRow> m_results;
+    QVector<CommitRepoRow> m_results;
 };

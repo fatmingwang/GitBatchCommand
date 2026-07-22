@@ -18,20 +18,30 @@
 #include <QMetaObject>
 #include <QDir>
 #include <QColor>
+#include <QSettings>
+
+namespace {
+const auto kLastRootDirKey = QStringLiteral("lastRootDirectory");
+}
 
 CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     : QWidget(parent), m_logPanel(logPanel)
 {
     m_rootEdit = new QLineEdit(this);
+    m_rootEdit->setText(QSettings().value(kLastRootDirKey).toString());
     m_browseBtn = new QPushButton(QStringLiteral("Browse..."), this);
     m_scanBtn = new QPushButton(QStringLiteral("Scan"), this);
 
-    m_table = new QTableWidget(0, 4, this);
-    m_table->setHorizontalHeaderLabels({QString(), QStringLiteral("Repository"), QStringLiteral("Path"), QStringLiteral("Status")});
-    m_table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::ResizeToContents);
-    m_table->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
-    m_table->horizontalHeader()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    m_table = new QTableWidget(0, 5, this);
+    m_table->setHorizontalHeaderLabels({QString(), QStringLiteral("Repository"), QStringLiteral("Path"), QStringLiteral("Branch"), QStringLiteral("Status")});
+    m_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+    m_table->horizontalHeader()->setStretchLastSection(false);
+    m_table->setColumnWidth(0, 28);
+    m_table->setColumnWidth(1, 200);
+    m_table->setColumnWidth(2, 320);
+    m_table->setColumnWidth(3, 160);
+    m_table->setColumnWidth(4, 90);
+    m_table->setWordWrap(true);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionMode(QAbstractItemView::NoSelection);
 
@@ -131,6 +141,7 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     connect(m_worker, &CommitWorker::logWarning, m_logPanel, &LogPanel::appendWarning);
     connect(m_worker, &CommitWorker::logError, m_logPanel, &LogPanel::appendError);
     connect(m_worker, &CommitWorker::scanFinished, this, &CommitPage::onScanFinished);
+    connect(m_worker, &CommitWorker::repoBranchInfo, this, &CommitPage::onRepoBranchInfo);
     connect(m_worker, &CommitWorker::progress, this, &CommitPage::onProgress);
     connect(m_worker, &CommitWorker::repoResult, this, &CommitPage::onRepoResult);
     connect(m_worker, &CommitWorker::commitFinished, this, &CommitPage::onCommitFinished);
@@ -157,8 +168,10 @@ CommitPage::~CommitPage()
 void CommitPage::onBrowseRoot()
 {
     const QString dir = QFileDialog::getExistingDirectory(this, QStringLiteral("Select Root Directory"));
-    if (!dir.isEmpty())
+    if (!dir.isEmpty()) {
         m_rootEdit->setText(dir);
+        QSettings().setValue(kLastRootDirKey, dir);
+    }
 }
 
 void CommitPage::setBusy(bool busy)
@@ -248,14 +261,27 @@ void CommitPage::populateTable(const QStringList &paths)
         const QString &path = paths[r];
         const QString name = QDir(path).dirName();
 
+        // A path nested under any earlier path in the list is a submodule (possibly nested
+        // several levels deep); indent it to show it belongs to that parent repository.
+        bool isSubmodule = false;
+        for (int p = 0; p < r; ++p) {
+            const QString &other = paths[p];
+            if (path.startsWith(other + QDir::separator())) {
+                isSubmodule = true;
+                break;
+            }
+        }
+        const QString displayName = isSubmodule ? (QStringLiteral("    ↳ ") + name) : name;
+
         auto *checkItem = new QTableWidgetItem;
         checkItem->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled);
         checkItem->setCheckState(Qt::Checked);
         m_table->setItem(r, 0, checkItem);
 
-        m_table->setItem(r, 1, new QTableWidgetItem(name));
+        m_table->setItem(r, 1, new QTableWidgetItem(displayName));
         m_table->setItem(r, 2, new QTableWidgetItem(path));
-        m_table->setItem(r, 3, new QTableWidgetItem(QStringLiteral("Pending")));
+        m_table->setItem(r, 3, new QTableWidgetItem(QStringLiteral("...")));
+        m_table->setItem(r, 4, new QTableWidgetItem(QStringLiteral("Pending")));
     }
 }
 
@@ -267,6 +293,15 @@ void CommitPage::onScanFinished(QStringList repoPaths)
 
     if (repoPaths.isEmpty())
         QMessageBox::information(this, QStringLiteral("Scan Complete"), QStringLiteral("No git repositories were found under this directory."));
+}
+
+void CommitPage::onRepoBranchInfo(QString path, QString branchInfo)
+{
+    const int row = rowForPath(path);
+    if (row < 0)
+        return;
+    m_table->item(row, 3)->setText(branchInfo);
+    m_table->resizeRowToContents(row);
 }
 
 void CommitPage::onProgress(int done, int total)
@@ -288,7 +323,7 @@ void CommitPage::onRepoResult(QString path, QString status, QString message)
         else
             item->setForeground(QColor(QStringLiteral("#d32f2f")));
         item->setToolTip(message);
-        m_table->setItem(row, 3, item);
+        m_table->setItem(row, 4, item);
     }
 }
 
@@ -300,7 +335,7 @@ void CommitPage::beginOperation(const QStringList &selected)
     m_progressBar->setValue(0);
     for (int r = 0; r < m_table->rowCount(); ++r) {
         const bool isSelected = m_table->item(r, 0)->checkState() == Qt::Checked;
-        m_table->item(r, 3)->setText(isSelected ? QStringLiteral("Working...") : QStringLiteral("Skipped"));
+        m_table->item(r, 4)->setText(isSelected ? QStringLiteral("Working...") : QStringLiteral("Skipped"));
     }
 }
 
@@ -325,7 +360,7 @@ void CommitPage::showProblemsSummary(const QString &title, const QString &okMess
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
     box.setWindowTitle(title);
-    box.setText(QStringLiteral("%1 of %2 repositories had conflicts or failures.").arg(problems.size()).arg(m_results.size()));
+    box.setText(QStringLiteral("%1 of %2 selected items had conflicts or failures.").arg(problems.size()).arg(m_results.size()));
     box.setDetailedText(details);
     box.exec();
 }
@@ -334,7 +369,7 @@ void CommitPage::onCommit()
 {
     const QStringList selected = selectedPaths();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Commit"), QStringLiteral("Please select at least one repository first."));
+        QMessageBox::information(this, QStringLiteral("Commit"), QStringLiteral("Please select at least one repository or submodule first."));
         return;
     }
     const QString message = m_commitMessageEdit->text().trimmed();
@@ -369,7 +404,7 @@ void CommitPage::onPush()
 {
     const QStringList selected = selectedPaths();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Push"), QStringLiteral("Please select at least one repository first."));
+        QMessageBox::information(this, QStringLiteral("Push"), QStringLiteral("Please select at least one repository or submodule first."));
         return;
     }
 
@@ -397,7 +432,7 @@ void CommitPage::onSwitchBranch()
 {
     const QStringList selected = selectedPaths();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Switch Branch"), QStringLiteral("Please select at least one repository first."));
+        QMessageBox::information(this, QStringLiteral("Switch Branch"), QStringLiteral("Please select at least one repository or submodule first."));
         return;
     }
     const QString branch = m_switchBranchEdit->text().trimmed();
@@ -431,7 +466,7 @@ void CommitPage::onMergeBranch()
 {
     const QStringList selected = selectedPaths();
     if (selected.isEmpty()) {
-        QMessageBox::information(this, QStringLiteral("Merge From Branch"), QStringLiteral("Please select at least one repository first."));
+        QMessageBox::information(this, QStringLiteral("Merge From Branch"), QStringLiteral("Please select at least one repository or submodule first."));
         return;
     }
     const QString branch = m_mergeBranchEdit->text().trimmed();
