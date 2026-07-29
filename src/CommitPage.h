@@ -5,6 +5,7 @@
 
 class QTableWidget;
 class QTableWidgetItem;
+class QListWidget;
 class QLineEdit;
 class QCheckBox;
 class QPushButton;
@@ -30,6 +31,7 @@ private slots:
     void onScan();
     void onSelectAll();
     void onSelectNone();
+    void onCheckSelectedFromList();
     void onCommit();
     void onPush();
     void onSwitchBranch();
@@ -61,6 +63,8 @@ private:
     QPushButton *m_browseBtn;
     QPushButton *m_scanBtn;
     QTableWidget *m_table;
+    QListWidget *m_pickList;
+    QPushButton *m_checkSelectedBtn;
     QPushButton *m_selectAllBtn;
     QPushButton *m_selectNoneBtn;
 

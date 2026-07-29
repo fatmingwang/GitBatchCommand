@@ -5,6 +5,7 @@
 #include <QTableWidget>
 #include <QTableWidgetItem>
 #include <QHeaderView>
+#include <QListWidget>
 #include <QLineEdit>
 #include <QCheckBox>
 #include <QPushButton>
@@ -22,6 +23,10 @@
 
 namespace {
 const auto kLastRootDirKey = QStringLiteral("lastRootDirectory");
+
+// Qt::UserRole "kind" tags for Quick Select list items.
+constexpr int kPickAllMain = 1;      // checks every top-level (non-submodule) row
+constexpr int kPickAllWithName = 2;  // Qt::UserRole+1 holds a submodule folder name
 }
 
 CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
@@ -44,6 +49,10 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     m_table->setWordWrap(true);
     m_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
     m_table->setSelectionMode(QAbstractItemView::NoSelection);
+
+    m_pickList = new QListWidget(this);
+    m_pickList->setSelectionMode(QAbstractItemView::ExtendedSelection);
+    m_checkSelectedBtn = new QPushButton(QStringLiteral("Check Selected"), this);
 
     m_selectAllBtn = new QPushButton(QStringLiteral("Select All"), this);
     m_selectNoneBtn = new QPushButton(QStringLiteral("Select None"), this);
@@ -86,6 +95,17 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     selectionRow->addWidget(m_selectNoneBtn);
     selectionRow->addStretch();
 
+    auto *pickGroup = new QGroupBox(QStringLiteral("Quick Select"), this);
+    auto *pickLayout = new QVBoxLayout(pickGroup);
+    pickLayout->addWidget(m_pickList);
+    pickLayout->addWidget(m_checkSelectedBtn);
+    pickGroup->setMinimumWidth(220);
+    pickGroup->setMaximumWidth(280);
+
+    auto *tableRow = new QHBoxLayout;
+    tableRow->addWidget(m_table, 1);
+    tableRow->addWidget(pickGroup);
+
     auto *commitButtonRow = new QHBoxLayout;
     commitButtonRow->addWidget(m_commitBtn);
     commitButtonRow->addWidget(m_pushBtn);
@@ -115,7 +135,7 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     auto *mainLayout = new QVBoxLayout(this);
     mainLayout->addWidget(rootGroup);
     mainLayout->addLayout(selectionRow);
-    mainLayout->addWidget(m_table);
+    mainLayout->addLayout(tableRow);
     mainLayout->addWidget(m_progressBar);
     mainLayout->addWidget(commitGroup);
     mainLayout->addWidget(switchGroup);
@@ -125,6 +145,7 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     connect(m_scanBtn, &QPushButton::clicked, this, &CommitPage::onScan);
     connect(m_selectAllBtn, &QPushButton::clicked, this, &CommitPage::onSelectAll);
     connect(m_selectNoneBtn, &QPushButton::clicked, this, &CommitPage::onSelectNone);
+    connect(m_checkSelectedBtn, &QPushButton::clicked, this, &CommitPage::onCheckSelectedFromList);
     connect(m_table, &QTableWidget::itemChanged, this, &CommitPage::onTableItemChanged);
     connect(m_commitBtn, &QPushButton::clicked, this, &CommitPage::onCommit);
     connect(m_pushBtn, &QPushButton::clicked, this, &CommitPage::onPush);
@@ -153,6 +174,7 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
 
     m_selectAllBtn->setEnabled(false);
     m_selectNoneBtn->setEnabled(false);
+    m_checkSelectedBtn->setEnabled(false);
     m_commitBtn->setEnabled(false);
     m_pushBtn->setEnabled(false);
     m_switchBtn->setEnabled(false);
@@ -186,6 +208,8 @@ void CommitPage::setBusy(bool busy)
     m_mergeBranchEdit->setEnabled(!busy);
     m_selectAllBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
     m_selectNoneBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
+    m_checkSelectedBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
+    m_pickList->setEnabled(!busy);
     updateActionButtons();
 }
 
@@ -207,6 +231,7 @@ void CommitPage::onScan()
     }
     setBusy(true);
     m_table->setRowCount(0);
+    m_pickList->clear();
     m_repoPaths.clear();
     QMetaObject::invokeMethod(m_worker, "scan", Qt::QueuedConnection, Q_ARG(QString, root));
 }
@@ -221,6 +246,31 @@ void CommitPage::onSelectNone()
 {
     for (int r = 0; r < m_table->rowCount(); ++r)
         setRowChecked(r, false);
+}
+
+void CommitPage::onCheckSelectedFromList()
+{
+    const auto selectedItems = m_pickList->selectedItems();
+    if (selectedItems.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Check Selected"), QStringLiteral("Select one or more items in the Quick Select list first (click, then Ctrl+Click or Shift+Click to add more)."));
+        return;
+    }
+    for (QListWidgetItem *item : selectedItems) {
+        const int kind = item->data(Qt::UserRole).toInt();
+        if (kind == kPickAllMain) {
+            for (int r = 0; r < m_table->rowCount(); ++r) {
+                if (!m_table->item(r, 0)->data(Qt::UserRole).toBool())
+                    setRowChecked(r, true);
+            }
+        } else {
+            const QString subName = item->data(Qt::UserRole + 1).toString();
+            for (int r = 0; r < m_table->rowCount(); ++r) {
+                const bool isSubmodule = m_table->item(r, 0)->data(Qt::UserRole).toBool();
+                if (isSubmodule && QDir(m_table->item(r, 2)->text()).dirName() == subName)
+                    setRowChecked(r, true);
+            }
+        }
+    }
 }
 
 void CommitPage::setRowChecked(int row, bool checked)
@@ -257,31 +307,52 @@ int CommitPage::rowForPath(const QString &path) const
 void CommitPage::populateTable(const QStringList &paths)
 {
     m_table->setRowCount(paths.size());
+    m_pickList->clear();
+
+    auto *allMainItem = new QListWidgetItem(QStringLiteral("★ All Main Repositories"));
+    allMainItem->setData(Qt::UserRole, kPickAllMain);
+    m_pickList->addItem(allMainItem);
+
+    QStringList submoduleNamesSeen;
+
     for (int r = 0; r < paths.size(); ++r) {
         const QString &path = paths[r];
         const QString name = QDir(path).dirName();
 
-        // A path nested under any earlier path in the list is a submodule (possibly nested
-        // several levels deep); indent it to show it belongs to that parent repository.
-        bool isSubmodule = false;
-        for (int p = 0; p < r; ++p) {
-            const QString &other = paths[p];
-            if (path.startsWith(other + QDir::separator())) {
-                isSubmodule = true;
+        // The nearest earlier path that is a proper ancestor directory is this row's immediate
+        // parent; scanning backwards finds it first because of the depth-first scan order.
+        int parentRow = -1;
+        for (int p = r - 1; p >= 0; --p) {
+            if (path.startsWith(paths[p] + QDir::separator())) {
+                parentRow = p;
                 break;
             }
         }
+        const bool isSubmodule = parentRow >= 0;
         const QString displayName = isSubmodule ? (QStringLiteral("    ↳ ") + name) : name;
 
         auto *checkItem = new QTableWidgetItem;
         checkItem->setFlags(Qt::ItemIsUserCheckable | Qt::ItemIsEnabled);
         checkItem->setCheckState(Qt::Checked);
+        checkItem->setData(Qt::UserRole, isSubmodule);
         m_table->setItem(r, 0, checkItem);
 
         m_table->setItem(r, 1, new QTableWidgetItem(displayName));
         m_table->setItem(r, 2, new QTableWidgetItem(path));
         m_table->setItem(r, 3, new QTableWidgetItem(QStringLiteral("...")));
         m_table->setItem(r, 4, new QTableWidgetItem(QStringLiteral("Pending")));
+
+        if (isSubmodule && !submoduleNamesSeen.contains(name))
+            submoduleNamesSeen << name;
+    }
+
+    // One Quick Select entry per unique submodule name, regardless of how many repos have it;
+    // picking it checks every row across every repo whose submodule folder matches that name.
+    for (const QString &subName : submoduleNamesSeen) {
+        auto *pickItem = new QListWidgetItem(QStringLiteral("    ↳ ") + subName);
+        pickItem->setData(Qt::UserRole, kPickAllWithName);
+        pickItem->setData(Qt::UserRole + 1, subName);
+        m_pickList->addItem(pickItem);
     }
 }
 
