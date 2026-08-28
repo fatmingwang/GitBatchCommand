@@ -20,4 +20,9 @@ QString currentBranch(const QString &path);
 // "git submodule update --init -- <relPath>" for just that submodule.
 bool ensureRepoReady(const QString &path, const std::function<void(const QString &)> &onLine);
 
+// Finds the git repository that owns path as a submodule - the nearest ancestor directory that
+// is itself a git repository - along with path's location relative to it. Works whether or not
+// the submodule at path has been initialized yet. Returns false if no such ancestor is found.
+bool findOwningRepo(const QString &path, QString *parentRepoPath, QString *relPath);
+
 } // namespace RepoScanner

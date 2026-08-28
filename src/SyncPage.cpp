@@ -12,6 +12,8 @@
 #include <QThread>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QSplitter>
+#include <QScrollArea>
 #include <QGroupBox>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -87,14 +89,9 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
 
     auto *pickGroup = new QGroupBox(QStringLiteral("Quick Select"), this);
     auto *pickLayout = new QVBoxLayout(pickGroup);
-    pickLayout->addWidget(m_pickList);
+    pickLayout->addWidget(m_pickList, 1);
     pickLayout->addWidget(m_checkSelectedBtn);
     pickGroup->setMinimumWidth(220);
-    pickGroup->setMaximumWidth(280);
-
-    auto *tableRow = new QHBoxLayout;
-    tableRow->addWidget(m_table, 1);
-    tableRow->addWidget(pickGroup);
 
     auto *actionRow = new QHBoxLayout;
     actionRow->addWidget(m_revertCleanBtn);
@@ -104,13 +101,49 @@ SyncPage::SyncPage(LogPanel *logPanel, QWidget *parent)
     branchRow->addWidget(m_branchEdit);
     branchRow->addWidget(m_switchBtn);
 
+    auto *tableColumn = new QWidget(this);
+    auto *tableColumnLayout = new QVBoxLayout(tableColumn);
+    tableColumnLayout->setContentsMargins(0, 0, 0, 0);
+    tableColumnLayout->addLayout(selectionRow);
+    tableColumnLayout->addWidget(m_table, 1);
+    tableColumnLayout->addWidget(m_progressBar);
+
+    auto *actionsColumn = new QWidget(this);
+    auto *actionsColumnLayout = new QVBoxLayout(actionsColumn);
+    actionsColumnLayout->setContentsMargins(0, 0, 0, 0);
+    actionsColumnLayout->addLayout(actionRow);
+    actionsColumnLayout->addLayout(branchRow);
+    actionsColumnLayout->addStretch();
+
+    auto *actionsScrollArea = new QScrollArea(this);
+    actionsScrollArea->setWidget(actionsColumn);
+    actionsScrollArea->setWidgetResizable(true);
+    actionsScrollArea->setFrameShape(QFrame::NoFrame);
+    actionsScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    actionsScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    auto *contentSplitter = new QSplitter(Qt::Horizontal, this);
+    contentSplitter->addWidget(tableColumn);
+    contentSplitter->addWidget(actionsScrollArea);
+    contentSplitter->setStretchFactor(0, 4);
+    contentSplitter->setStretchFactor(1, 1);
+    contentSplitter->setSizes({780, 220});
+
+    auto *leftContainer = new QWidget(this);
+    auto *leftLayout = new QVBoxLayout(leftContainer);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(rootGroup);
+    leftLayout->addWidget(contentSplitter, 1);
+
+    auto *bodySplitter = new QSplitter(Qt::Horizontal, this);
+    bodySplitter->addWidget(leftContainer);
+    bodySplitter->addWidget(pickGroup);
+    bodySplitter->setStretchFactor(0, 4);
+    bodySplitter->setStretchFactor(1, 1);
+    bodySplitter->setSizes({1020, 260});
+
     auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->addWidget(rootGroup);
-    mainLayout->addLayout(selectionRow);
-    mainLayout->addLayout(tableRow);
-    mainLayout->addWidget(m_progressBar);
-    mainLayout->addLayout(actionRow);
-    mainLayout->addLayout(branchRow);
+    mainLayout->addWidget(bodySplitter);
 
     connect(m_browseBtn, &QPushButton::clicked, this, &SyncPage::onBrowseRoot);
     connect(m_scanBtn, &QPushButton::clicked, this, &SyncPage::onScan);

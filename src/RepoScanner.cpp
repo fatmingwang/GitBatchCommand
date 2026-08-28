@@ -101,14 +101,26 @@ bool ensureRepoReady(const QString &path, const std::function<void(const QString
 
     // Not a git repo yet - it may be an uninitialized submodule. Walk up to find the owning
     // repository (parent repo or another submodule) and initialize just this one on demand.
+    QString parentRepoPath, relPath;
+    if (!findOwningRepo(path, &parentRepoPath, &relPath))
+        return false;
+
+    GitProcess::run(parentRepoPath,
+                     {QStringLiteral("submodule"), QStringLiteral("update"), QStringLiteral("--init"), QStringLiteral("--"), relPath},
+                     onLine);
+    return isGitRepo(path);
+}
+
+bool findOwningRepo(const QString &path, QString *parentRepoPath, QString *relPath)
+{
     QDir parent(path);
     while (parent.cdUp()) {
         if (isGitRepo(parent.absolutePath())) {
-            const QString relPath = parent.relativeFilePath(path);
-            GitProcess::run(parent.absolutePath(),
-                             {QStringLiteral("submodule"), QStringLiteral("update"), QStringLiteral("--init"), QStringLiteral("--"), relPath},
-                             onLine);
-            return isGitRepo(path);
+            if (parentRepoPath)
+                *parentRepoPath = parent.absolutePath();
+            if (relPath)
+                *relPath = parent.relativeFilePath(path);
+            return true;
         }
         if (parent.isRoot())
             break;

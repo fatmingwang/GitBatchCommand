@@ -13,6 +13,9 @@ public slots:
     void pushAll(QStringList repoPaths);
     void switchBranch(QStringList repoPaths, QString branchName);
     void mergeFromBranch(QStringList repoPaths, QString branchName);
+    void initSwitchPull(QStringList repoPaths);
+    void removeSubmodules(QStringList repoPaths);
+    void addSubmodule(QStringList repoPaths, QString url, QString relPath);
 
 signals:
     void logLine(QString line);
@@ -27,4 +30,7 @@ signals:
     void pushFinished();
     void switchFinished();
     void mergeFinished();
+    void initSwitchPullFinished();
+    void removeSubmodulesFinished();
+    void addSubmoduleFinished();
 };

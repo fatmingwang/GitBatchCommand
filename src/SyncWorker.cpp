@@ -163,6 +163,7 @@ void SyncWorker::switchBranch(QStringList repoPaths, QString branchName)
             }
         }
 
+        emit repoBranchInfo(path, RepoScanner::currentBranch(path));
         emit logInfo(QStringLiteral("Switched: ") + path + QStringLiteral(" (") + resultMessage + QStringLiteral(")"));
         emit repoResult(path, QStringLiteral("OK"), resultMessage);
         ++done;

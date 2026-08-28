@@ -36,6 +36,9 @@ private slots:
     void onPush();
     void onSwitchBranch();
     void onMergeBranch();
+    void onInitSwitchPull();
+    void onRemoveSubmodule();
+    void onAddSubmodule();
 
     void onScanFinished(QStringList repoPaths);
     void onRepoBranchInfo(QString path, QString branchInfo);
@@ -45,6 +48,9 @@ private slots:
     void onPushFinished();
     void onSwitchFinished();
     void onMergeFinished();
+    void onInitSwitchPullFinished();
+    void onRemoveSubmoduleFinished();
+    void onAddSubmoduleFinished();
     void onTableItemChanged(QTableWidgetItem *item);
 
 private:
@@ -55,6 +61,8 @@ private:
     void showProblemsSummary(const QString &title, const QString &okMessage);
     void updateActionButtons();
     QStringList selectedPaths() const;
+    QStringList selectedSubmodulePaths() const;
+    QStringList selectedMainRepoPaths() const;
     void setRowChecked(int row, bool checked);
 
     LogPanel *m_logPanel;
@@ -78,6 +86,14 @@ private:
 
     QLineEdit *m_mergeBranchEdit;
     QPushButton *m_mergeBtn;
+
+    QPushButton *m_initSwitchPullBtn;
+
+    QPushButton *m_removeSubmoduleBtn;
+
+    QLineEdit *m_addSubmoduleUrlEdit;
+    QLineEdit *m_addSubmodulePathEdit;
+    QPushButton *m_addSubmoduleBtn;
 
     QProgressBar *m_progressBar;
 

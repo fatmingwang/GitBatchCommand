@@ -15,7 +15,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     setWindowTitle(QStringLiteral("Batch Git Command"));
-    resize(1000, 750);
+    resize(1300, 800);
 
     auto *logPanel = new LogPanel(this);
 

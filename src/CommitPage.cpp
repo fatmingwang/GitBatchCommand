@@ -7,12 +7,15 @@
 #include <QHeaderView>
 #include <QListWidget>
 #include <QLineEdit>
+#include <QLabel>
 #include <QCheckBox>
 #include <QPushButton>
 #include <QProgressBar>
 #include <QThread>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QSplitter>
+#include <QScrollArea>
 #include <QGroupBox>
 #include <QFileDialog>
 #include <QMessageBox>
@@ -77,6 +80,19 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     m_mergeBtn = new QPushButton(QStringLiteral("Merge Selected From Branch"), this);
     m_mergeBtn->setMinimumHeight(32);
 
+    m_initSwitchPullBtn = new QPushButton(QStringLiteral("Init Submodule (if needed) + Switch to master/main + Pull"), this);
+    m_initSwitchPullBtn->setMinimumHeight(32);
+
+    m_removeSubmoduleBtn = new QPushButton(QStringLiteral("Remove Checked Submodule(s)"), this);
+    m_removeSubmoduleBtn->setMinimumHeight(32);
+
+    m_addSubmoduleUrlEdit = new QLineEdit(this);
+    m_addSubmoduleUrlEdit->setPlaceholderText(QStringLiteral("submodule git URL, e.g. https://github.com/user/repo.git"));
+    m_addSubmodulePathEdit = new QLineEdit(this);
+    m_addSubmodulePathEdit->setPlaceholderText(QStringLiteral("optional path, e.g. libs/repo (defaults to the repository name at the root)"));
+    m_addSubmoduleBtn = new QPushButton(QStringLiteral("Add Submodule To Checked Main Repositories"), this);
+    m_addSubmoduleBtn->setMinimumHeight(32);
+
     m_progressBar = new QProgressBar(this);
     m_progressBar->setRange(0, 1);
     m_progressBar->setValue(0);
@@ -97,14 +113,9 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
 
     auto *pickGroup = new QGroupBox(QStringLiteral("Quick Select"), this);
     auto *pickLayout = new QVBoxLayout(pickGroup);
-    pickLayout->addWidget(m_pickList);
+    pickLayout->addWidget(m_pickList, 1);
     pickLayout->addWidget(m_checkSelectedBtn);
     pickGroup->setMinimumWidth(220);
-    pickGroup->setMaximumWidth(280);
-
-    auto *tableRow = new QHBoxLayout;
-    tableRow->addWidget(m_table, 1);
-    tableRow->addWidget(pickGroup);
 
     auto *commitButtonRow = new QHBoxLayout;
     commitButtonRow->addWidget(m_commitBtn);
@@ -132,14 +143,84 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     auto *mergeLayout = new QVBoxLayout(mergeGroup);
     mergeLayout->addLayout(mergeRow);
 
+    auto *initSwitchPullGroup = new QGroupBox(QStringLiteral("Submodule Init && Sync"), this);
+    auto *initSwitchPullLayout = new QVBoxLayout(initSwitchPullGroup);
+    auto *initSwitchPullLabel = new QLabel(QStringLiteral("For each selected repository/submodule: initialize it if not yet checked out, switch to 'master' (falling back to 'main'), then pull."), initSwitchPullGroup);
+    initSwitchPullLabel->setWordWrap(true);
+    initSwitchPullLayout->addWidget(initSwitchPullLabel);
+    initSwitchPullLayout->addWidget(m_initSwitchPullBtn);
+
+    auto *removeSubmoduleGroup = new QGroupBox(QStringLiteral("Remove Submodule"), this);
+    auto *removeSubmoduleLayout = new QVBoxLayout(removeSubmoduleGroup);
+    auto *removeSubmoduleLabel = new QLabel(QStringLiteral("Deinitializes and removes each checked submodule from disk and from its parent repository's index (staged; commit the parent to finalize)."), removeSubmoduleGroup);
+    removeSubmoduleLabel->setWordWrap(true);
+    removeSubmoduleLayout->addWidget(removeSubmoduleLabel);
+    removeSubmoduleLayout->addWidget(m_removeSubmoduleBtn);
+
+    auto *addSubmoduleUrlRow = new QHBoxLayout;
+    addSubmoduleUrlRow->addWidget(new QLabel(QStringLiteral("URL:"), this));
+    addSubmoduleUrlRow->addWidget(m_addSubmoduleUrlEdit);
+
+    auto *addSubmodulePathRow = new QHBoxLayout;
+    addSubmodulePathRow->addWidget(new QLabel(QStringLiteral("Path:"), this));
+    addSubmodulePathRow->addWidget(m_addSubmodulePathEdit);
+
+    auto *addSubmoduleGroup = new QGroupBox(QStringLiteral("Add Submodule"), this);
+    auto *addSubmoduleLayout = new QVBoxLayout(addSubmoduleGroup);
+    auto *addSubmoduleLabel = new QLabel(QStringLiteral("Adds a new submodule from the URL below (optionally at a specific path, instead of the repository root) to each checked main (non-submodule) repository, updates it, and switches it to 'master' (falling back to 'main')."), addSubmoduleGroup);
+    addSubmoduleLabel->setWordWrap(true);
+    addSubmoduleLayout->addWidget(addSubmoduleLabel);
+    addSubmoduleLayout->addLayout(addSubmoduleUrlRow);
+    addSubmoduleLayout->addLayout(addSubmodulePathRow);
+    addSubmoduleLayout->addWidget(m_addSubmoduleBtn);
+
+    auto *tableColumn = new QWidget(this);
+    auto *tableColumnLayout = new QVBoxLayout(tableColumn);
+    tableColumnLayout->setContentsMargins(0, 0, 0, 0);
+    tableColumnLayout->addLayout(selectionRow);
+    tableColumnLayout->addWidget(m_table, 1);
+    tableColumnLayout->addWidget(m_progressBar);
+
+    auto *actionsColumn = new QWidget(this);
+    auto *actionsColumnLayout = new QVBoxLayout(actionsColumn);
+    actionsColumnLayout->setContentsMargins(0, 0, 0, 0);
+    actionsColumnLayout->addWidget(commitGroup);
+    actionsColumnLayout->addWidget(switchGroup);
+    actionsColumnLayout->addWidget(mergeGroup);
+    actionsColumnLayout->addWidget(initSwitchPullGroup);
+    actionsColumnLayout->addWidget(removeSubmoduleGroup);
+    actionsColumnLayout->addWidget(addSubmoduleGroup);
+    actionsColumnLayout->addStretch();
+
+    auto *actionsScrollArea = new QScrollArea(this);
+    actionsScrollArea->setWidget(actionsColumn);
+    actionsScrollArea->setWidgetResizable(true);
+    actionsScrollArea->setFrameShape(QFrame::NoFrame);
+    actionsScrollArea->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    actionsScrollArea->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+
+    auto *contentSplitter = new QSplitter(Qt::Horizontal, this);
+    contentSplitter->addWidget(tableColumn);
+    contentSplitter->addWidget(actionsScrollArea);
+    contentSplitter->setStretchFactor(0, 3);
+    contentSplitter->setStretchFactor(1, 2);
+    contentSplitter->setSizes({620, 380});
+
+    auto *leftContainer = new QWidget(this);
+    auto *leftLayout = new QVBoxLayout(leftContainer);
+    leftLayout->setContentsMargins(0, 0, 0, 0);
+    leftLayout->addWidget(rootGroup);
+    leftLayout->addWidget(contentSplitter, 1);
+
+    auto *bodySplitter = new QSplitter(Qt::Horizontal, this);
+    bodySplitter->addWidget(leftContainer);
+    bodySplitter->addWidget(pickGroup);
+    bodySplitter->setStretchFactor(0, 4);
+    bodySplitter->setStretchFactor(1, 1);
+    bodySplitter->setSizes({1020, 260});
+
     auto *mainLayout = new QVBoxLayout(this);
-    mainLayout->addWidget(rootGroup);
-    mainLayout->addLayout(selectionRow);
-    mainLayout->addLayout(tableRow);
-    mainLayout->addWidget(m_progressBar);
-    mainLayout->addWidget(commitGroup);
-    mainLayout->addWidget(switchGroup);
-    mainLayout->addWidget(mergeGroup);
+    mainLayout->addWidget(bodySplitter);
 
     connect(m_browseBtn, &QPushButton::clicked, this, &CommitPage::onBrowseRoot);
     connect(m_scanBtn, &QPushButton::clicked, this, &CommitPage::onScan);
@@ -151,6 +232,9 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     connect(m_pushBtn, &QPushButton::clicked, this, &CommitPage::onPush);
     connect(m_switchBtn, &QPushButton::clicked, this, &CommitPage::onSwitchBranch);
     connect(m_mergeBtn, &QPushButton::clicked, this, &CommitPage::onMergeBranch);
+    connect(m_initSwitchPullBtn, &QPushButton::clicked, this, &CommitPage::onInitSwitchPull);
+    connect(m_removeSubmoduleBtn, &QPushButton::clicked, this, &CommitPage::onRemoveSubmodule);
+    connect(m_addSubmoduleBtn, &QPushButton::clicked, this, &CommitPage::onAddSubmodule);
 
     m_thread = new QThread(this);
     m_worker = new CommitWorker();
@@ -169,6 +253,9 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     connect(m_worker, &CommitWorker::pushFinished, this, &CommitPage::onPushFinished);
     connect(m_worker, &CommitWorker::switchFinished, this, &CommitPage::onSwitchFinished);
     connect(m_worker, &CommitWorker::mergeFinished, this, &CommitPage::onMergeFinished);
+    connect(m_worker, &CommitWorker::initSwitchPullFinished, this, &CommitPage::onInitSwitchPullFinished);
+    connect(m_worker, &CommitWorker::removeSubmodulesFinished, this, &CommitPage::onRemoveSubmoduleFinished);
+    connect(m_worker, &CommitWorker::addSubmoduleFinished, this, &CommitPage::onAddSubmoduleFinished);
 
     m_thread->start();
 
@@ -179,6 +266,9 @@ CommitPage::CommitPage(LogPanel *logPanel, QWidget *parent)
     m_pushBtn->setEnabled(false);
     m_switchBtn->setEnabled(false);
     m_mergeBtn->setEnabled(false);
+    m_initSwitchPullBtn->setEnabled(false);
+    m_removeSubmoduleBtn->setEnabled(false);
+    m_addSubmoduleBtn->setEnabled(false);
 }
 
 CommitPage::~CommitPage()
@@ -206,6 +296,8 @@ void CommitPage::setBusy(bool busy)
     m_stageAllCheck->setEnabled(!busy);
     m_switchBranchEdit->setEnabled(!busy);
     m_mergeBranchEdit->setEnabled(!busy);
+    m_addSubmoduleUrlEdit->setEnabled(!busy);
+    m_addSubmodulePathEdit->setEnabled(!busy);
     m_selectAllBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
     m_selectNoneBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
     m_checkSelectedBtn->setEnabled(!busy && !m_repoPaths.isEmpty());
@@ -220,6 +312,9 @@ void CommitPage::updateActionButtons()
     m_pushBtn->setEnabled(hasSelection);
     m_switchBtn->setEnabled(hasSelection);
     m_mergeBtn->setEnabled(hasSelection);
+    m_initSwitchPullBtn->setEnabled(hasSelection);
+    m_removeSubmoduleBtn->setEnabled(hasSelection);
+    m_addSubmoduleBtn->setEnabled(hasSelection);
 }
 
 void CommitPage::onScan()
@@ -284,6 +379,26 @@ QStringList CommitPage::selectedPaths() const
     QStringList paths;
     for (int r = 0; r < m_table->rowCount(); ++r) {
         if (m_table->item(r, 0)->checkState() == Qt::Checked)
+            paths << m_table->item(r, 2)->text();
+    }
+    return paths;
+}
+
+QStringList CommitPage::selectedSubmodulePaths() const
+{
+    QStringList paths;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        if (m_table->item(r, 0)->checkState() == Qt::Checked && m_table->item(r, 0)->data(Qt::UserRole).toBool())
+            paths << m_table->item(r, 2)->text();
+    }
+    return paths;
+}
+
+QStringList CommitPage::selectedMainRepoPaths() const
+{
+    QStringList paths;
+    for (int r = 0; r < m_table->rowCount(); ++r) {
+        if (m_table->item(r, 0)->checkState() == Qt::Checked && !m_table->item(r, 0)->data(Qt::UserRole).toBool())
             paths << m_table->item(r, 2)->text();
     }
     return paths;
@@ -404,9 +519,12 @@ void CommitPage::beginOperation(const QStringList &selected)
     setBusy(true);
     m_progressBar->setRange(0, selected.size());
     m_progressBar->setValue(0);
-    for (int r = 0; r < m_table->rowCount(); ++r) {
-        const bool isSelected = m_table->item(r, 0)->checkState() == Qt::Checked;
-        m_table->item(r, 4)->setText(isSelected ? QStringLiteral("Working...") : QStringLiteral("Skipped"));
+    for (int r = 0; r < m_table->rowCount(); ++r)
+        m_table->item(r, 4)->setText(QStringLiteral("Skipped"));
+    for (const QString &path : selected) {
+        const int row = rowForPath(path);
+        if (row >= 0)
+            m_table->item(row, 4)->setText(QStringLiteral("Working..."));
     }
 }
 
@@ -565,4 +683,99 @@ void CommitPage::onMergeFinished()
 {
     showProblemsSummary(QStringLiteral("Merge Finished"),
                          QStringLiteral("All repositories were merged successfully. No conflicts."));
+}
+
+void CommitPage::onInitSwitchPull()
+{
+    const QStringList selected = selectedPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Init Submodule + Switch + Pull"), QStringLiteral("Please select at least one repository or submodule first."));
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Confirm Init + Switch + Pull"));
+    box.setText(QStringLiteral("For %1 selected repositories: initialize if needed, switch to 'master' (or 'main'), and pull?").arg(selected.size()));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Starting init/switch/pull for %1 selected repositories...").arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "initSwitchPull", Qt::QueuedConnection, Q_ARG(QStringList, selected));
+}
+
+void CommitPage::onInitSwitchPullFinished()
+{
+    showProblemsSummary(QStringLiteral("Init + Switch + Pull Finished"),
+                         QStringLiteral("All repositories were initialized, switched, and pulled successfully."));
+}
+
+void CommitPage::onRemoveSubmodule()
+{
+    const QStringList selected = selectedSubmodulePaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Remove Submodule"), QStringLiteral("Please check at least one submodule (not a main repository) first."));
+        return;
+    }
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(QStringLiteral("Confirm Submodule Removal"));
+    box.setText(QStringLiteral("Permanently remove %1 checked submodule(s) from disk and deinitialize them?\n"
+                                "The removal from the parent repository's index will be staged; commit the parent repository to finalize it.\n"
+                                "This cannot be undone by this tool.").arg(selected.size()));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Removing %1 checked submodules...").arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "removeSubmodules", Qt::QueuedConnection, Q_ARG(QStringList, selected));
+}
+
+void CommitPage::onRemoveSubmoduleFinished()
+{
+    showProblemsSummary(QStringLiteral("Submodule Removal Finished"),
+                         QStringLiteral("All checked submodules were removed successfully. Scan again to refresh the list, and commit each parent repository to finalize."));
+}
+
+void CommitPage::onAddSubmodule()
+{
+    const QStringList selected = selectedMainRepoPaths();
+    if (selected.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Add Submodule"), QStringLiteral("Please check at least one main repository (not a submodule) first."));
+        return;
+    }
+    const QString url = m_addSubmoduleUrlEdit->text().trimmed();
+    if (url.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Add Submodule"), QStringLiteral("Please enter the submodule's git URL."));
+        return;
+    }
+    const QString relPath = m_addSubmodulePathEdit->text().trimmed();
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Question);
+    box.setWindowTitle(QStringLiteral("Confirm Add Submodule"));
+    box.setText(relPath.isEmpty()
+                    ? QStringLiteral("Add submodule '%1' to %2 checked main repositories?").arg(url).arg(selected.size())
+                    : QStringLiteral("Add submodule '%1' at path '%2' to %3 checked main repositories?").arg(url, relPath).arg(selected.size()));
+    box.setStandardButtons(QMessageBox::Yes | QMessageBox::No);
+    box.setDefaultButton(QMessageBox::No);
+    if (box.exec() != QMessageBox::Yes)
+        return;
+
+    beginOperation(selected);
+    m_logPanel->appendInfo(QStringLiteral("Adding submodule '%1' to %2 checked main repositories...").arg(url).arg(selected.size()));
+    QMetaObject::invokeMethod(m_worker, "addSubmodule", Qt::QueuedConnection,
+                               Q_ARG(QStringList, selected), Q_ARG(QString, url), Q_ARG(QString, relPath));
+}
+
+void CommitPage::onAddSubmoduleFinished()
+{
+    showProblemsSummary(QStringLiteral("Add Submodule Finished"),
+                         QStringLiteral("The submodule was added to all checked main repositories successfully. Scan again to refresh the list."));
 }
